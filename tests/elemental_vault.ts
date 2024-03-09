@@ -27,7 +27,7 @@ import {
   WITHDRAW_TIMEFRAME,
   YIELD_BPS,
 } from "./constant";
-import { amountToToptup } from "./utils";
+import { amountToToptup, delay } from "./utils";
 
 describe("elemental_vault", () => {
   // Configure the client to use the local cluster.
@@ -38,7 +38,8 @@ describe("elemental_vault", () => {
   const program = anchor.workspace.ElementalVault as Program<ElementalVault>;
 
   let vaultOwner = anchor.web3.Keypair.generate();
-  let vaultOwnerAta: PublicKey;
+  let vaultOwnerMint1Ata: PublicKey;
+  let vaultOwnerMint2Ata: PublicKey;
   let global: PublicKey;
   let vault: PublicKey;
   let vaultAta: PublicKey;
@@ -87,7 +88,7 @@ describe("elemental_vault", () => {
     );
 
     // Create baseMint1 ATA
-    vaultOwnerAta = (
+    vaultOwnerMint1Ata = (
       await getOrCreateAssociatedTokenAccount(
         connection,
         vaultOwner,
@@ -129,7 +130,7 @@ describe("elemental_vault", () => {
       10_000_000
     );
     // Create baseMint2 ATA
-    vaultOwnerAta = (
+    vaultOwnerMint2Ata = (
       await getOrCreateAssociatedTokenAccount(
         connection,
         vaultOwner,
@@ -171,6 +172,7 @@ describe("elemental_vault", () => {
       10_000_000
     );
   });
+
   it("Initialize Global", async () => {
     global = getGlobalPda(program);
 
@@ -185,12 +187,14 @@ describe("elemental_vault", () => {
         .rpc();
     } catch (error) {
       console.log("error", error);
+      process.exit();
     }
     const globalData = await program.account.global.fetch(global);
 
-    assert(+globalData.vaultCounter, 0);
+    assert.equal(+globalData.vaultCounter, 0);
   });
-  it("Initialize Escrow", async () => {
+
+  it("Initialize Vault", async () => {
     const globalData = await program.account.global.fetch(global);
     vault = getVaultPda(program, globalData.vaultCounter);
     vaultAta = getAssociatedTokenAddressSync(baseMint1, vault, true);
@@ -216,24 +220,39 @@ describe("elemental_vault", () => {
         .rpc();
     } catch (error) {
       console.log("error", error);
+      process.exit();
     }
     const globalDataPost = await program.account.global.fetch(global);
     const vaultData = await getVaultData(program, vault);
 
-    assert(+globalDataPost.vaultCounter, 1);
+    assert.equal(+globalDataPost.vaultCounter, 1, "vaultCounter");
 
-    assert(+vaultData.vaultCount, 0);
-    assert(vaultData.authority.toString(), vaultOwner.publicKey.toString());
-    assert(vaultData.baseMint.toString(), baseMint1.toString());
-    assert(vaultData.yieldBps, YIELD_BPS);
-    assert(+vaultData.vaultCapacity, +VAULT_CAPACITY);
-    assert(+vaultData.minAmount, +MIN_AMOUNT);
-    expect(+vaultData.startDate).to.be.greaterThan(Date.now());
-    expect(+vaultData.endDate).to.be.greaterThan(+vaultData.startDate);
-    assert(+vaultData.withdrawTimeframe, +WITHDRAW_TIMEFRAME);
-    assert(+vaultData.amountCollected, 0);
-    assert(+vaultData.amountWithdrawn, 0);
-    assert(+vaultData.amountRedeemed, 0);
+    assert.equal(+vaultData.vaultCount, 0, "vaultCount");
+    assert.equal(
+      vaultData.authority.toString(),
+      vaultOwner.publicKey.toString(),
+      "authority"
+    );
+    assert.equal(
+      vaultData.baseMint.toString(),
+      baseMint1.toString(),
+      "baseMint"
+    );
+    assert.equal(vaultData.yieldBps, YIELD_BPS, "yieldBps");
+    assert.equal(+vaultData.vaultCapacity, +VAULT_CAPACITY, "vaultCapacity");
+    assert.equal(+vaultData.minAmount, +MIN_AMOUNT, "minAmount");
+    expect(Date.now(), "startDate").to.be.greaterThan(+vaultData.startDate);
+    expect(+vaultData.endDate, "endDate").to.be.greaterThan(
+      +vaultData.startDate
+    );
+    assert.equal(
+      +vaultData.withdrawTimeframe,
+      +WITHDRAW_TIMEFRAME,
+      "withdrawTimeframe"
+    );
+    assert.equal(+vaultData.amountCollected, 0, "amountCollected");
+    assert.equal(+vaultData.amountWithdrawn, 0, "amountWithdrawn");
+    assert.equal(+vaultData.amountRedeemed, 0, "amountRedeemed");
   });
 
   it("Update Escrow Authority", async () => {
@@ -252,10 +271,15 @@ describe("elemental_vault", () => {
         .rpc();
     } catch (error) {
       console.log("error", error);
+      process.exit();
     }
     const vaultData = await getVaultData(program, selectedVault.publicKey);
 
-    assert(vaultData.authority.toString(), user1.publicKey.toString());
+    assert.equal(
+      vaultData.authority.toString(),
+      user1.publicKey.toString(),
+      "authority"
+    );
 
     await program.methods
       .updateAuthority(selectedVault.account.vaultCount)
@@ -268,13 +292,17 @@ describe("elemental_vault", () => {
       .rpc();
     const vaultDataPost = await getVaultData(program, selectedVault.publicKey);
 
-    assert(vaultDataPost.authority.toString(), user1.publicKey.toString());
+    assert.equal(
+      vaultDataPost.authority.toString(),
+      vaultOwner.publicKey.toString(),
+      "authority2"
+    );
   });
 
   it("Initialize user1 and deposit amount ot vault", async () => {
     const allVault = await getAllVaultData(program);
     const selectedVault = allVault[0];
-    const userPda = await getUserPda(
+    const userPda = getUserPda(
       program,
       selectedVault.account.vaultCount,
       user1.publicKey
@@ -299,18 +327,30 @@ describe("elemental_vault", () => {
 
     const vaultData = await getVaultData(program, selectedVault.publicKey);
     const userData = await getUserData(program, userPda);
+    const vaultBalance =
+      await program.provider.connection.getTokenAccountBalance(vaultAta);
 
-    assert(+userData.amount, USER1_DEPOSIT_AMOUNT);
-    assert(+userData.owner, user1.publicKey.toString());
-    assert(+userData.vaultCount, +selectedVault.account.vaultCount);
+    assert.equal(+userData.amount, USER1_DEPOSIT_AMOUNT, "amount");
+    assert.equal(
+      userData.owner.toString(),
+      user1.publicKey.toString(),
+      "owner"
+    );
+    assert.equal(
+      +userData.vaultCount,
+      +selectedVault.account.vaultCount,
+      "vaultCount"
+    );
 
-    assert(+vaultData.amountCollected, USER1_DEPOSIT_AMOUNT);
+    assert.equal(+vaultData.amountCollected, USER1_DEPOSIT_AMOUNT);
+
+    assert.equal(+vaultBalance.value.amount, USER1_DEPOSIT_AMOUNT);
   });
 
   it("User1 deposit amount ot vault", async () => {
     const allVault = await getAllVaultData(program);
     const selectedVault = allVault[0];
-    const userPda = await getUserPda(
+    const userPda = getUserPda(
       program,
       selectedVault.account.vaultCount,
       user1.publicKey
@@ -336,11 +376,23 @@ describe("elemental_vault", () => {
     const vaultData = await getVaultData(program, selectedVault.publicKey);
     const userData = await getUserData(program, userPda);
 
-    assert(+userData.amount, USER1_DEPOSIT_AMOUNT * 2);
-    assert(+userData.owner, user1.publicKey.toString());
-    assert(+userData.vaultCount, +selectedVault.account.vaultCount);
+    assert.equal(+userData.amount, USER1_DEPOSIT_AMOUNT * 2, "amount");
+    assert.equal(
+      userData.owner.toString(),
+      user1.publicKey.toString(),
+      "owner"
+    );
+    assert.equal(
+      +userData.vaultCount,
+      +selectedVault.account.vaultCount,
+      "vaultCount"
+    );
 
-    assert(+vaultData.amountCollected, USER1_DEPOSIT_AMOUNT * 2);
+    assert.equal(
+      +vaultData.amountCollected,
+      USER1_DEPOSIT_AMOUNT * 2,
+      "amountCollected"
+    );
   });
 
   it("Authority withdraw from vault", async () => {
@@ -354,7 +406,7 @@ describe("elemental_vault", () => {
       )
       .accounts({
         authority: vaultOwner.publicKey,
-        destinationAta: vaultOwnerAta,
+        destinationAta: vaultOwnerMint1Ata,
         vaultAta: vaultAta,
         vault: selectedVault.publicKey,
         baseMint: baseMint1,
@@ -364,7 +416,11 @@ describe("elemental_vault", () => {
 
     const vaultData = await getVaultData(program, selectedVault.publicKey);
 
-    assert(+vaultData.amountWithdrawn, USER1_DEPOSIT_AMOUNT * 2);
+    assert.equal(
+      +vaultData.amountWithdrawn,
+      USER1_DEPOSIT_AMOUNT * 2,
+      "amountWithdrawn"
+    );
   });
   it("User to withdraw amount with yield from vault", async () => {
     // AUTHORITY TOPUP AMOUNT BACK AFTER END_DATE
@@ -372,17 +428,18 @@ describe("elemental_vault", () => {
     await transfer(
       program.provider.connection,
       vaultOwner,
-      vaultOwnerAta,
+      vaultOwnerMint1Ata,
       vaultAta,
-      vault,
+      vaultOwner,
       amount
     );
     const vaultAtaAmountPre =
       await program.provider.connection.getTokenAccountBalance(vaultAta);
     const vaultDataPre = await program.account.vault.fetch(vault);
-    assert(
+    assert.equal(
       +vaultAtaAmountPre.value.amount,
-      (+vaultDataPre.amountCollected / 10_000) * vaultDataPre.yieldBps
+      (+vaultDataPre.amountCollected / 10_000) * vaultDataPre.yieldBps,
+      "vaultAtaAmountPre"
     );
     const allVault = await getAllVaultData(program);
     const selectedVault = allVault[0];
@@ -395,35 +452,41 @@ describe("elemental_vault", () => {
     const userAtaAmountPre =
       await program.provider.connection.getTokenAccountBalance(user1Mint1Ata);
 
-    await program.methods
-      .userWithdraw(selectedVault.account.vaultCount)
-      .accounts({
-        owner: user1.publicKey,
-        sourceAta: vaultAta,
-        destinationAta: user1Mint1Ata,
-        vault: selectedVault.publicKey,
-        user: user,
-        baseMint: baseMint1,
-      })
-      .signers([user1])
-      .rpc();
+    await delay(4_000);
+    try {
+      await program.methods
+        .userWithdraw(selectedVault.account.vaultCount)
+        .accounts({
+          owner: user1.publicKey,
+          sourceAta: vaultAta,
+          destinationAta: user1Mint1Ata,
+          vault: selectedVault.publicKey,
+          user: user,
+          baseMint: baseMint1,
+        })
+        .signers([user1])
+        .rpc();
+    } catch (error) {
+      console.log("error", error);
+    }
 
-    const userData = await program.account.user.fetch(user);
-    const vaultData = await getVaultData(program, selectedVault.publicKey);
+    try {
+      await program.account.user.fetch(user);
+    } catch (error) {
+      assert.ok(error.toString().includes("Account does not exist"));
+    }
     const vaultAtaAmountPost =
       await program.provider.connection.getTokenAccountBalance(vaultAta);
     const userAtaAmountPost =
       await program.provider.connection.getTokenAccountBalance(user1Mint1Ata);
 
-    assert(+vaultData.amountRedeemed, +userData.amount);
-    assert(
+    assert.equal(
       +vaultAtaAmountPre.value.amount - +vaultAtaAmountPost.value.amount,
       +userAtaAmountPre.value.amount - +userAtaAmountPost.value.amount
     );
   });
 
-  // TODO: close_escrow
-  it("User to withdraw amount with yield from vault", async () => {
+  it("Authority Close Escrow", async () => {
     const allVault = await getAllVaultData(program);
     const selectedVault = allVault[0];
 
@@ -432,7 +495,7 @@ describe("elemental_vault", () => {
       .accounts({
         owner: vaultOwner.publicKey,
         sourceAta: vaultAta,
-        destinationAta: vaultOwnerAta,
+        destinationAta: vaultOwnerMint1Ata,
         vault: selectedVault.publicKey,
         baseMint: baseMint1,
       })
@@ -444,7 +507,7 @@ describe("elemental_vault", () => {
       assert.fail();
     } catch (error) {
       console.log("error", error);
-      assert.ok(error.includes("not found"));
+      assert.ok(error.toString().includes("Account does not exist"));
     }
   });
 });

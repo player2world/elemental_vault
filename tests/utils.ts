@@ -1,11 +1,11 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
-import { Vault } from "../target/types/vault";
+import { ElementalVault } from "../target/types/elemental_vault";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 
 export const amountToToptup = async (
-  program: Program<Vault>,
+  program: Program<ElementalVault>,
   vaultPda: PublicKey
 ) => {
   // Calculate amount to topup with amount_collected x yield - ata_amount - amount_redeemed
@@ -22,7 +22,7 @@ export const amountToToptup = async (
   console.log("amountToReturn", amountToReturn);
   const currentVaultAtaAmount =
     await program.provider.connection.getTokenAccountBalance(vaultAta);
-  console.log("currentVaultAtaAmount", currentVaultAtaAmount);
+  console.log("currentVaultAtaAmount", currentVaultAtaAmount.value);
   const amountToTopup =
     amountToReturn -
     +currentVaultAtaAmount.value.amount -
@@ -30,4 +30,10 @@ export const amountToToptup = async (
   console.log("amountToTopup", amountToTopup);
 
   return amountToTopup;
+};
+
+export const delay = async (ms: number): Promise<void> => {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 };

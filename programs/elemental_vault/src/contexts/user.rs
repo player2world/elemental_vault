@@ -17,7 +17,7 @@ pub struct InitOrDepositUser<'info> {
         mut,
         associated_token::mint = base_mint,
         associated_token::authority = owner,
-        constraint = source_ata.amount == amount,
+        constraint = source_ata.amount >= amount,
     )]
     pub source_ata: Account<'info, TokenAccount>,
     // vault ATA to store base mint token.
@@ -57,7 +57,7 @@ pub struct UserWithdraw<'info> {
         mut,
         associated_token::mint = base_mint,
         associated_token::authority = vault,
-        constraint = source_ata.amount >= user.amount @ ErrorCode::VaultNotReady
+        constraint = source_ata.amount <= user.amount @ ErrorCode::VaultNotReady
     )]
     pub source_ata: Account<'info, TokenAccount>,
     // User's ATA
@@ -95,7 +95,7 @@ pub struct CloseVault<'info> {
         mut,
         associated_token::mint = base_mint,
         associated_token::authority = vault,
-        close = owner
+        // close = owner
     )]
     pub source_ata: Account<'info, TokenAccount>,
     // authority's ATA

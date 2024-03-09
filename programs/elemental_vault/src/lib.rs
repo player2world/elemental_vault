@@ -12,7 +12,7 @@ declare_id!("4mEadSTaipg1DNU4ELELNNMqmTNhCbKHHjckDdXM3DLx");
 
 #[program]
 pub mod elemental_vault {
-    use anchor_spl::token::TransferChecked;
+    use anchor_spl::token::{close_account, CloseAccount, TransferChecked};
 
     use super::*;
 
@@ -20,6 +20,7 @@ pub mod elemental_vault {
         ctx.accounts.global.vault_counter = 0;
         Ok(())
     }
+
     pub fn init_or_update_vault(
         ctx: Context<InitOrUpdateVault>,
         vault_count: u64,
@@ -31,13 +32,15 @@ pub mod elemental_vault {
 
         // CHECK IF IS INITIALIZE
         if global.vault_counter == vault_count {
+            msg!("INIT");
             vault.vault_count = vault_count;
             vault.base_mint = ctx.accounts.base_mint.key();
             vault.authority = initializer.key();
             vault.amount_collected = 0;
             vault.amount_withdrawn = 0;
             vault.amount_redeemed = 0;
-            global.vault_counter.checked_add(1).unwrap();
+
+            global.vault_counter = global.vault_counter.checked_add(1).unwrap();
             assign_if_some!(params.yield_bps, yield_bps, vault, throw_error);
             assign_if_some!(params.min_amount, min_amount, vault, throw_error);
             assign_if_some!(params.start_date, start_date, vault, throw_error);
@@ -60,7 +63,7 @@ pub mod elemental_vault {
             return err!(ErrorCode::InvalidStartTimeInput);
         }
 
-        if params.start_date.unwrap() < params.end_date.unwrap() {
+        if params.start_date.unwrap() >= params.end_date.unwrap() {
             return err!(ErrorCode::InvalidEndTimeInput);
         }
 
@@ -119,11 +122,11 @@ pub mod elemental_vault {
         );
         transfer_checked(transfer_ctx, amount, base_mint.decimals)?;
 
-        vault.amount_collected.checked_add(amount).unwrap();
+        vault.amount_collected = vault.amount_collected.checked_add(amount).unwrap();
 
         user.vault_count = vault_count;
         user.owner = owner.key();
-        user.amount = amount;
+        user.amount = user.amount.checked_add(amount).unwrap();
 
         Ok(())
     }
@@ -132,10 +135,10 @@ pub mod elemental_vault {
         vault_count: u64,
         amount: u64,
     ) -> Result<()> {
-        let authority = &mut ctx.accounts.authority;
         let destination_ata = &mut ctx.accounts.destination_ata;
         let base_mint = &ctx.accounts.base_mint;
         let vault = &mut ctx.accounts.vault;
+        let vault_ata = &mut ctx.accounts.vault_ata;
 
         let signer_seed: &[&[&[u8]]] = &[&[
             b"vault".as_ref(),
@@ -143,12 +146,12 @@ pub mod elemental_vault {
             &[ctx.bumps.vault],
         ]];
 
-        // TRANSNFER AMOUNT FROM VAULT TO AUTHORITY ATA
+        // TRANSFER AMOUNT FROM VAULT TO AUTHORITY ATA
         let transfer_cpi_accounts = TransferChecked {
-            from: vault.to_account_info(),
+            from: vault_ata.to_account_info(),
             mint: base_mint.to_account_info(),
             to: destination_ata.to_account_info(),
-            authority: authority.to_account_info(),
+            authority: vault.to_account_info(),
         };
         let transfer_ctx = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
@@ -157,20 +160,24 @@ pub mod elemental_vault {
         .with_signer(signer_seed);
         transfer_checked(transfer_ctx, amount, base_mint.decimals)?;
 
-        vault.amount_withdrawn.checked_add(amount).unwrap();
+        vault.amount_withdrawn = vault.amount_withdrawn.checked_add(amount).unwrap();
 
         Ok(())
     }
 
     pub fn user_withdraw(ctx: Context<UserWithdraw>, vault_count: u64) -> Result<()> {
-        let owner = &mut ctx.accounts.owner;
         let source_ata = &mut ctx.accounts.source_ata;
         let base_mint = &ctx.accounts.base_mint;
         let vault = &mut ctx.accounts.vault;
         let user = &mut ctx.accounts.user;
         let destination_ata = &mut ctx.accounts.destination_ata;
 
-        if Clock::get()?.unix_timestamp as u64 <= vault.end_date {
+        msg!(
+            "Clock::get()?.unix_timestamp as u64: {}",
+            Clock::get()?.unix_timestamp as u64
+        );
+        msg!("vault.end_date: {}", vault.end_date);
+        if Clock::get()?.unix_timestamp as u64 * 1000 <= vault.end_date {
             return err!(ErrorCode::VaultNotReady);
         }
 
@@ -187,7 +194,7 @@ pub mod elemental_vault {
             from: source_ata.to_account_info(),
             mint: base_mint.to_account_info(),
             to: destination_ata.to_account_info(),
-            authority: owner.to_account_info(),
+            authority: vault.to_account_info(),
         };
         let transfer_ctx = CpiContext::new(
             ctx.accounts.token_program.to_account_info(),
@@ -196,7 +203,7 @@ pub mod elemental_vault {
         .with_signer(signer_seed);
         transfer_checked(transfer_ctx, amount_to_transfer, base_mint.decimals)?;
 
-        vault
+        vault.amount_redeemed = vault
             .amount_redeemed
             .checked_add(amount_to_transfer)
             .unwrap();
@@ -236,17 +243,17 @@ pub mod elemental_vault {
         transfer_checked(transfer_ctx, source_ata.amount, base_mint.decimals)?;
 
         // CLOSE VAULT AND TRANSFER RENT TO INITIALIZER
-        // let close_cpi_accounts = CloseAccount {
-        //     account: vault.to_account_info(),
-        //     destination: initializer.to_account_info(),
-        //     authority: vault.to_account_info(),
-        // };
-        // let close_ctx = CpiContext::new_with_signer(
-        //     ctx.accounts.token_program.to_account_info(),
-        //     close_cpi_accounts,
-        //     signer_seeds,
-        // );
-        // close_account(close_ctx)?;
+        let close_cpi_accounts = CloseAccount {
+            account: source_ata.to_account_info(),
+            destination: ctx.accounts.owner.to_account_info(),
+            authority: vault.to_account_info(),
+        };
+        let close_ctx = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            close_cpi_accounts,
+        )
+        .with_signer(signer_seed);
+        close_account(close_ctx)?;
 
         Ok(())
     }

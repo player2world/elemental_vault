@@ -70,7 +70,7 @@ pub struct AuthorityWithdraw<'info> {
     )]
     pub destination_ata: Account<'info, TokenAccount>,
     // vault that holds state
-    #[account(seeds = [Vault::seed(), &vault_count.to_le_bytes()], bump)]
+    #[account(mut, seeds = [Vault::seed(), &vault_count.to_le_bytes()], bump)]
     pub vault: Account<'info, Vault>,
     // vault ATA to store base mint token.
     #[account(
