@@ -32,7 +32,6 @@ pub mod elemental_vault {
 
         // CHECK IF IS INITIALIZE
         if global.vault_counter == vault_count {
-            msg!("INIT");
             vault.vault_count = vault_count;
             vault.base_mint = ctx.accounts.base_mint.key();
             vault.authority = initializer.key();
@@ -41,10 +40,19 @@ pub mod elemental_vault {
             vault.amount_redeemed = 0;
 
             global.vault_counter = global.vault_counter.checked_add(1).unwrap();
+
+            let start_time = InitOrUpdateVaultParam::to_unix_time(params.start_date);
+            let end_time = InitOrUpdateVaultParam::to_unix_time(params.end_date);
+
+            if start_time.unwrap() < Clock::get()?.unix_timestamp as u64
+                || end_time.unwrap() < Clock::get()?.unix_timestamp as u64
+            {
+                return err!(ErrorCode::InvalidTimeInput);
+            }
             assign_if_some!(params.yield_bps, yield_bps, vault, throw_error);
             assign_if_some!(params.min_amount, min_amount, vault, throw_error);
-            assign_if_some!(params.start_date, start_date, vault, throw_error);
-            assign_if_some!(params.end_date, end_date, vault, throw_error);
+            assign_if_some!(start_time, start_date, vault, throw_error);
+            assign_if_some!(end_time, end_date, vault, throw_error);
             assign_if_some!(params.vault_capacity, vault_capacity, vault, throw_error);
             assign_if_some!(
                 params.withdraw_timeframe,
@@ -54,25 +62,31 @@ pub mod elemental_vault {
             );
         }
 
-        // vault STATE NOT UPDATABLE IF FUNDS HAVE BEEN COLLECTED
+        if vault.authority != initializer.key() {
+            return err!(ErrorCode::Unauthorized);
+        }
+
+        // VAULT STATE NOT UPDATABLE IF FUNDS HAVE BEEN COLLECTED
         if vault.amount_collected != 0 {
             return err!(ErrorCode::NotUpdatable);
         }
 
-        if params.start_date.unwrap() <= Clock::get()?.unix_timestamp as u64 {
+        let start_time = InitOrUpdateVaultParam::to_unix_time(params.start_date);
+        let end_time = InitOrUpdateVaultParam::to_unix_time(params.end_date);
+        // CAN'T UPDATE ONCE VAULT IS ACTIVE
+        if start_time.unwrap() <= Clock::get()?.unix_timestamp as u64 {
             return err!(ErrorCode::InvalidStartTimeInput);
         }
 
-        if params.start_date.unwrap() >= params.end_date.unwrap() {
+        // END DATE MUST BE LATER THAN START DATE
+        if start_time.unwrap() >= end_time.unwrap() {
             return err!(ErrorCode::InvalidEndTimeInput);
         }
 
-        vault.base_mint = ctx.accounts.base_mint.key();
-
         assign_if_some!(params.yield_bps, yield_bps, vault, ignore_none);
         assign_if_some!(params.min_amount, min_amount, vault, ignore_none);
-        assign_if_some!(params.start_date, start_date, vault, ignore_none);
-        assign_if_some!(params.end_date, end_date, vault, ignore_none);
+        assign_if_some!(start_time, start_date, vault, ignore_none);
+        assign_if_some!(end_time, end_date, vault, ignore_none);
         assign_if_some!(params.vault_capacity, vault_capacity, vault, ignore_none);
         assign_if_some!(
             params.withdraw_timeframe,
@@ -83,6 +97,7 @@ pub mod elemental_vault {
 
         Ok(())
     }
+
     pub fn update_authority(ctx: Context<UpdateAuthority>, _vault_count: u64) -> Result<()> {
         ctx.accounts.vault.authority = ctx.accounts.new_authority.key();
         Ok(())
@@ -130,6 +145,7 @@ pub mod elemental_vault {
 
         Ok(())
     }
+
     pub fn authority_withdraw(
         ctx: Context<AuthorityWithdraw>,
         vault_count: u64,
@@ -172,12 +188,9 @@ pub mod elemental_vault {
         let user = &mut ctx.accounts.user;
         let destination_ata = &mut ctx.accounts.destination_ata;
 
-        msg!(
-            "Clock::get()?.unix_timestamp as u64: {}",
-            Clock::get()?.unix_timestamp as u64
-        );
-        msg!("vault.end_date: {}", vault.end_date);
-        if Clock::get()?.unix_timestamp as u64 * 1000 <= vault.end_date {
+        msg!("unix_timestamp: {}", Clock::get()?.unix_timestamp);
+        msg!("end_date: {}", vault.end_date);
+        if Clock::get()?.unix_timestamp as u64 <= vault.end_date {
             return err!(ErrorCode::VaultNotReady);
         }
 
@@ -245,7 +258,7 @@ pub mod elemental_vault {
         // CLOSE VAULT AND TRANSFER RENT TO INITIALIZER
         let close_cpi_accounts = CloseAccount {
             account: source_ata.to_account_info(),
-            destination: ctx.accounts.owner.to_account_info(),
+            destination: ctx.accounts.authority.to_account_info(),
             authority: vault.to_account_info(),
         };
         let close_ctx = CpiContext::new(
@@ -258,6 +271,3 @@ pub mod elemental_vault {
         Ok(())
     }
 }
-
-#[derive(Accounts)]
-pub struct Initialize {}

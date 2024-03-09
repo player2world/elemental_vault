@@ -8,6 +8,8 @@ pub enum ErrorCode {
     IncorrectCount,
     #[msg("Escrow state no longer updatable")]
     NotUpdatable,
+    #[msg("Invalid time input")]
+    InvalidTimeInput,
     #[msg("Start date must be later than the current time")]
     InvalidStartTimeInput,
     #[msg("End date must be later than start time")]
@@ -20,4 +22,6 @@ pub enum ErrorCode {
     VaultClose,
     #[msg("Vault not ready")]
     VaultNotReady,
+    #[msg("Incorrect mint input")]
+    InvalidMint,
 }

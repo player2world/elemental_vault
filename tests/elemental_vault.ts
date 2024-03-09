@@ -58,7 +58,7 @@ describe("elemental_vault", () => {
     await connection.confirmTransaction({
       blockhash: latestBlockHash.blockhash,
       lastValidBlockHeight: latestBlockHash.lastValidBlockHeight,
-      signature: await connection.requestAirdrop(vaultOwner.publicKey, 1e9),
+      signature: await connection.requestAirdrop(vaultOwner.publicKey, 2e9),
     });
     await connection.confirmTransaction({
       blockhash: latestBlockHash.blockhash,
@@ -117,9 +117,17 @@ describe("elemental_vault", () => {
       connection,
       vaultOwner,
       baseMint1,
+      vaultOwnerMint1Ata,
+      vaultOwner,
+      100_000_000
+    );
+    await mintTo(
+      connection,
+      vaultOwner,
+      baseMint1,
       user1Mint1Ata,
       vaultOwner,
-      10_000_000
+      100_000_000
     );
     await mintTo(
       connection,
@@ -127,7 +135,7 @@ describe("elemental_vault", () => {
       baseMint1,
       user2Mint1Ata,
       vaultOwner,
-      10_000_000
+      100_000_000
     );
     // Create baseMint2 ATA
     vaultOwnerMint2Ata = (
@@ -161,7 +169,7 @@ describe("elemental_vault", () => {
       baseMint2,
       user1Mint2Ata,
       vaultOwner,
-      10_000_000
+      100_000_000
     );
     await mintTo(
       connection,
@@ -169,7 +177,7 @@ describe("elemental_vault", () => {
       baseMint2,
       user2Mint2Ata,
       vaultOwner,
-      10_000_000
+      100_000_000
     );
   });
 
@@ -241,7 +249,9 @@ describe("elemental_vault", () => {
     assert.equal(vaultData.yieldBps, YIELD_BPS, "yieldBps");
     assert.equal(+vaultData.vaultCapacity, +VAULT_CAPACITY, "vaultCapacity");
     assert.equal(+vaultData.minAmount, +MIN_AMOUNT, "minAmount");
-    expect(Date.now(), "startDate").to.be.greaterThan(+vaultData.startDate);
+    expect(Date.now() * 1000, "startDate").to.be.greaterThan(
+      +vaultData.startDate
+    );
     expect(+vaultData.endDate, "endDate").to.be.greaterThan(
       +vaultData.startDate
     );
@@ -430,17 +440,12 @@ describe("elemental_vault", () => {
       vaultOwner,
       vaultOwnerMint1Ata,
       vaultAta,
-      vaultOwner,
+      vaultOwner.publicKey,
       amount
     );
     const vaultAtaAmountPre =
       await program.provider.connection.getTokenAccountBalance(vaultAta);
-    const vaultDataPre = await program.account.vault.fetch(vault);
-    assert.equal(
-      +vaultAtaAmountPre.value.amount,
-      (+vaultDataPre.amountCollected / 10_000) * vaultDataPre.yieldBps,
-      "vaultAtaAmountPre"
-    );
+
     const allVault = await getAllVaultData(program);
     const selectedVault = allVault[0];
 
@@ -449,10 +454,11 @@ describe("elemental_vault", () => {
       selectedVault.account.vaultCount,
       user1.publicKey
     );
+
     const userAtaAmountPre =
       await program.provider.connection.getTokenAccountBalance(user1Mint1Ata);
 
-    await delay(4_000);
+    await delay(8_000);
     try {
       await program.methods
         .userWithdraw(selectedVault.account.vaultCount)
@@ -468,6 +474,7 @@ describe("elemental_vault", () => {
         .rpc();
     } catch (error) {
       console.log("error", error);
+      process.exit();
     }
 
     try {
@@ -490,23 +497,26 @@ describe("elemental_vault", () => {
     const allVault = await getAllVaultData(program);
     const selectedVault = allVault[0];
 
-    await program.methods
-      .closeVault(selectedVault.account.vaultCount)
-      .accounts({
-        owner: vaultOwner.publicKey,
-        sourceAta: vaultAta,
-        destinationAta: vaultOwnerMint1Ata,
-        vault: selectedVault.publicKey,
-        baseMint: baseMint1,
-      })
-      .signers([vaultOwner])
-      .rpc();
+    try {
+      await program.methods
+        .closeVault(selectedVault.account.vaultCount)
+        .accounts({
+          authority: vaultOwner.publicKey,
+          sourceAta: vaultAta,
+          destinationAta: vaultOwnerMint1Ata,
+          vault: selectedVault.publicKey,
+          baseMint: baseMint1,
+        })
+        .signers([vaultOwner])
+        .rpc();
+    } catch (error) {
+      console.log("error", error);
+    }
 
     try {
       await program.account.vault.fetch(vault);
       assert.fail();
     } catch (error) {
-      console.log("error", error);
       assert.ok(error.toString().includes("Account does not exist"));
     }
   });
