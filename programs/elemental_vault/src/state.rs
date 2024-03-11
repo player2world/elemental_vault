@@ -52,9 +52,11 @@ impl Vault {
         b"vault"
     }
 
-    pub fn calculate_payout(base_amount: &u64, yield_bps: &u16) -> u64 {
+    pub fn calculate_payout(base_amount: &u64, vault: &Vault) -> u64 {
         // Calculate the commission amount using integer math, considering decimal places.
-        let commission_amount = base_amount / 100_00 * *yield_bps as u64;
+        let duration_seconds = vault.end_date - vault.start_date;
+        let yield_per_second = vault.yield_bps as u64 / 31_536_000;
+        let commission_amount = (base_amount * yield_per_second * duration_seconds) / 10_000;
 
         commission_amount
     }

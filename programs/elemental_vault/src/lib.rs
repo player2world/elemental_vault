@@ -200,7 +200,7 @@ pub mod elemental_vault {
             &[ctx.bumps.vault],
         ]];
 
-        let amount_to_transfer = state::Vault::calculate_payout(&user.amount, &vault.yield_bps);
+        let amount_to_transfer = state::Vault::calculate_payout(&user.amount, &vault);
 
         // TRANSNFER AMOUNT FROM VAULT TO AUTHORITY ATA
         let transfer_cpi_accounts = TransferChecked {
