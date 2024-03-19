@@ -44,8 +44,6 @@ pub struct InitOrUpdateVault<'info> {
 pub struct UpdateAuthority<'info> {
     #[account(mut)]
     pub current_authority: Signer<'info>,
-    /// CHECK:
-    pub new_authority: AccountInfo<'info>,
     // vault that holds state
     #[account(
         mut,
@@ -89,7 +87,6 @@ pub struct AuthorityWithdraw<'info> {
     pub system_program: Program<'info, System>,
 }
 
-
 #[derive(Accounts)]
 #[instruction(vault_count: u64)]
 pub struct CloseVault<'info> {
@@ -117,9 +114,13 @@ pub struct CloseVault<'info> {
         bump,
         constraint = vault.authority == authority.key(),
         constraint = vault.base_mint == base_mint.key(),
-        close = authority
+        constraint = vault.creator == creator.key(),
+        close = creator
     )]
     pub vault: Account<'info, Vault>,
+    #[account(mut)]
+    /// CHECK: constraint in vault
+    pub creator: AccountInfo<'info>,
     // The base mint of the vault
     pub base_mint: Account<'info, Mint>,
     pub token_program: Program<'info, Token>,
@@ -135,21 +136,5 @@ pub struct InitOrUpdateVaultParam {
     pub start_date: Option<u64>,
     pub end_date: Option<u64>,
     pub withdraw_timeframe: Option<u64>,
-}
-
-impl InitOrUpdateVaultParam {
-    pub fn to_unix_time(timestamp: Option<u64>) -> Option<u64> {
-        match timestamp {
-            Some(time) => {
-                if time > 1_000_000_000_000 {
-                    // Assuming it's in milliseconds
-                    Some(time / 1000)
-                } else {
-                    // Assuming it's in seconds
-                    Some(time)
-                }
-            }
-            None => None,
-        }
-    }
+    pub authority: Option<Pubkey>,
 }

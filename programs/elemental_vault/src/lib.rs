@@ -8,7 +8,7 @@ mod state;
 use contexts::*;
 use error::ErrorCode;
 
-declare_id!("4mEadSTaipg1DNU4ELELNNMqmTNhCbKHHjckDdXM3DLx");
+declare_id!("6E4qLpT6Pa8jQXUe8oh4TPuiXknQCRGCeckynyWw8Bdx");
 
 #[program]
 pub mod elemental_vault {
@@ -33,26 +33,31 @@ pub mod elemental_vault {
         // CHECK IF IS INITIALIZE
         if global.vault_counter == vault_count {
             vault.vault_count = vault_count;
+            vault.creator = initializer.key();
             vault.base_mint = ctx.accounts.base_mint.key();
-            vault.authority = initializer.key();
+            vault.authority = match params.authority {
+                Some(result) => result,
+                None => initializer.key(),
+            };
+
             vault.amount_collected = 0;
             vault.amount_withdrawn = 0;
             vault.amount_redeemed = 0;
 
-            global.vault_counter = global.vault_counter.checked_add(1).unwrap();
+            match global.vault_counter.checked_add(1) {
+                Some(result) => global.vault_counter = result,
+                None => return err!(ErrorCode::Overflow),
+            }
 
-            let start_time = InitOrUpdateVaultParam::to_unix_time(params.start_date);
-            let end_time = InitOrUpdateVaultParam::to_unix_time(params.end_date);
-
-            if start_time.unwrap() < Clock::get()?.unix_timestamp as u64
-                || end_time.unwrap() < Clock::get()?.unix_timestamp as u64
+            if params.start_date.unwrap() < (Clock::get()?.unix_timestamp * 1000) as u64
+                || params.end_date.unwrap() < (Clock::get()?.unix_timestamp * 1000) as u64
             {
                 return err!(ErrorCode::InvalidTimeInput);
             }
             assign_if_some!(params.yield_bps, yield_bps, vault, throw_error);
             assign_if_some!(params.min_amount, min_amount, vault, throw_error);
-            assign_if_some!(start_time, start_date, vault, throw_error);
-            assign_if_some!(end_time, end_date, vault, throw_error);
+            assign_if_some!(params.start_date, start_date, vault, throw_error);
+            assign_if_some!(params.end_date, end_date, vault, throw_error);
             assign_if_some!(params.vault_capacity, vault_capacity, vault, throw_error);
             assign_if_some!(
                 params.withdraw_timeframe,
@@ -62,7 +67,7 @@ pub mod elemental_vault {
             );
         }
 
-        if vault.authority != initializer.key() {
+        if vault.authority != initializer.key() && vault.creator != initializer.key() {
             return err!(ErrorCode::Unauthorized);
         }
 
@@ -71,22 +76,20 @@ pub mod elemental_vault {
             return err!(ErrorCode::NotUpdatable);
         }
 
-        let start_time = InitOrUpdateVaultParam::to_unix_time(params.start_date);
-        let end_time = InitOrUpdateVaultParam::to_unix_time(params.end_date);
         // CAN'T UPDATE ONCE VAULT IS ACTIVE
-        if start_time.unwrap() <= Clock::get()?.unix_timestamp as u64 {
+        if params.start_date.unwrap() <= (Clock::get()?.unix_timestamp * 1000) as u64 {
             return err!(ErrorCode::InvalidStartTimeInput);
         }
 
         // END DATE MUST BE LATER THAN START DATE
-        if start_time.unwrap() >= end_time.unwrap() {
+        if params.start_date.unwrap() >= params.end_date.unwrap() {
             return err!(ErrorCode::InvalidEndTimeInput);
         }
 
         assign_if_some!(params.yield_bps, yield_bps, vault, ignore_none);
         assign_if_some!(params.min_amount, min_amount, vault, ignore_none);
-        assign_if_some!(start_time, start_date, vault, ignore_none);
-        assign_if_some!(end_time, end_date, vault, ignore_none);
+        assign_if_some!(params.start_date, start_date, vault, ignore_none);
+        assign_if_some!(params.end_date, end_date, vault, ignore_none);
         assign_if_some!(params.vault_capacity, vault_capacity, vault, ignore_none);
         assign_if_some!(
             params.withdraw_timeframe,
@@ -98,16 +101,19 @@ pub mod elemental_vault {
         Ok(())
     }
 
-    pub fn update_authority(ctx: Context<UpdateAuthority>, _vault_count: u64) -> Result<()> {
-        ctx.accounts.vault.authority = ctx.accounts.new_authority.key();
+    pub fn update_authority(
+        ctx: Context<UpdateAuthority>,
+        _vault_count: u64,
+        new_authority: Pubkey,
+    ) -> Result<()> {
+        ctx.accounts.vault.authority = new_authority.key();
         Ok(())
     }
 
     pub fn init_or_deposit_user(
         ctx: Context<InitOrDepositUser>,
         vault_count: u64,
-        amount: u64,
-        multiplier: u16,
+        amount_to_transfer: u64,
     ) -> Result<()> {
         let owner = &mut ctx.accounts.owner;
         let source_ata = &mut ctx.accounts.source_ata;
@@ -116,11 +122,14 @@ pub mod elemental_vault {
         let user = &mut ctx.accounts.user;
         let destination_ata = &mut ctx.accounts.destination_ata;
 
-        if Clock::get()?.unix_timestamp as u64 >= vault.start_date {
+        if (Clock::get()?.unix_timestamp * 1000) as u64 >= vault.start_date {
             return err!(ErrorCode::VaultClose);
         }
 
-        let amount_to_transfer = amount * multiplier as u64;
+        if amount_to_transfer % vault.min_amount != 0 {
+            return err!(ErrorCode::InvalidMultiple);
+        }
+
         if amount_to_transfer + vault.amount_collected > vault.vault_capacity {
             return err!(ErrorCode::AmountExceedVaultCapacity);
         }
@@ -135,13 +144,19 @@ pub mod elemental_vault {
             ctx.accounts.token_program.to_account_info(),
             transfer_cpi_accounts,
         );
-        transfer_checked(transfer_ctx, amount, base_mint.decimals)?;
+        transfer_checked(transfer_ctx, amount_to_transfer, base_mint.decimals)?;
 
-        vault.amount_collected = vault.amount_collected.checked_add(amount).unwrap();
+        match vault.amount_collected.checked_add(amount_to_transfer) {
+            Some(result) => vault.amount_collected = result,
+            None => return err!(ErrorCode::Overflow),
+        }
 
         user.vault_count = vault_count;
         user.owner = owner.key();
-        user.amount = user.amount.checked_add(amount).unwrap();
+        match user.amount.checked_add(amount_to_transfer) {
+            Some(result) => user.amount = result,
+            None => return err!(ErrorCode::Overflow),
+        }
 
         Ok(())
     }
@@ -176,7 +191,10 @@ pub mod elemental_vault {
         .with_signer(signer_seed);
         transfer_checked(transfer_ctx, amount, base_mint.decimals)?;
 
-        vault.amount_withdrawn = vault.amount_withdrawn.checked_add(amount).unwrap();
+        match vault.amount_withdrawn.checked_add(amount) {
+            Some(result) => vault.amount_withdrawn = result,
+            None => return err!(ErrorCode::Overflow),
+        }
 
         Ok(())
     }
@@ -188,9 +206,9 @@ pub mod elemental_vault {
         let user = &mut ctx.accounts.user;
         let destination_ata = &mut ctx.accounts.destination_ata;
 
-        msg!("unix_timestamp: {}", Clock::get()?.unix_timestamp);
-        msg!("end_date: {}", vault.end_date);
-        if Clock::get()?.unix_timestamp as u64 <= vault.end_date {
+        msg!("unix {}", Clock::get()?.unix_timestamp * 1000);
+        msg!("end_date {}", vault.end_date);
+        if (Clock::get()?.unix_timestamp * 1000) as u64 <= vault.end_date {
             return err!(ErrorCode::VaultNotReady);
         }
 
@@ -200,7 +218,7 @@ pub mod elemental_vault {
             &[ctx.bumps.vault],
         ]];
 
-        let amount_to_transfer = state::Vault::calculate_payout(&user.amount, &vault);
+        let amount_to_transfer = state::Vault::calculate_payout(&user.amount, vault);
 
         // TRANSNFER AMOUNT FROM VAULT TO AUTHORITY ATA
         let transfer_cpi_accounts = TransferChecked {
@@ -216,10 +234,10 @@ pub mod elemental_vault {
         .with_signer(signer_seed);
         transfer_checked(transfer_ctx, amount_to_transfer, base_mint.decimals)?;
 
-        vault.amount_redeemed = vault
-            .amount_redeemed
-            .checked_add(amount_to_transfer)
-            .unwrap();
+        match vault.amount_redeemed.checked_add(amount_to_transfer) {
+            Some(result) => vault.amount_redeemed = result,
+            None => return err!(ErrorCode::Overflow),
+        }
 
         Ok(())
     }
@@ -237,7 +255,8 @@ pub mod elemental_vault {
             &[ctx.bumps.vault],
         ]];
 
-        if vault.end_date + vault.withdraw_timeframe < Clock::get()?.unix_timestamp as u64 {
+        if vault.end_date + vault.withdraw_timeframe > (Clock::get()?.unix_timestamp * 1000) as u64
+        {
             return err!(ErrorCode::VaultNotReady);
         }
 
@@ -255,10 +274,10 @@ pub mod elemental_vault {
         .with_signer(signer_seed);
         transfer_checked(transfer_ctx, source_ata.amount, base_mint.decimals)?;
 
-        // CLOSE VAULT AND TRANSFER RENT TO INITIALIZER
+        // CLOSE VAULT AND TRANSFER RENT TO CREATOR
         let close_cpi_accounts = CloseAccount {
             account: source_ata.to_account_info(),
-            destination: ctx.accounts.authority.to_account_info(),
+            destination: ctx.accounts.creator.to_account_info(),
             authority: vault.to_account_info(),
         };
         let close_ctx = CpiContext::new(

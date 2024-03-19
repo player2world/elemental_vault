@@ -2,8 +2,10 @@ use anchor_lang::prelude::*;
 
 #[error_code]
 pub enum ErrorCode {
-    #[msg("Signer have not authorisation")]
+    #[msg("Signer does not have authorisation")]
     Unauthorized,
+    #[msg("Invalid multiple")]
+    InvalidMultiple,
     #[msg("Pass in the current counter's count")]
     IncorrectCount,
     #[msg("Escrow state no longer updatable")]
@@ -24,4 +26,6 @@ pub enum ErrorCode {
     VaultNotReady,
     #[msg("Incorrect mint input")]
     InvalidMint,
+    #[msg("Overflow detected")]
+    Overflow,
 }

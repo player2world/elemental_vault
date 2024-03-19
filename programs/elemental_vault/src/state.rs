@@ -9,6 +9,8 @@ pub struct Global {
 pub struct Vault {
     // Vault UUID
     pub vault_count: u64,
+    // Vault payer
+    pub creator: Pubkey,
     // Withdraw and update vault state
     pub authority: Pubkey,
     // Vault Mint
@@ -58,8 +60,7 @@ impl Vault {
         let yield_earned_per_year = (base_amount * vault.yield_bps as u64) / 10_000;
         let yield_earned = (yield_earned_per_year * duration_seconds) / (31_536_000);
 
-        let payout = base_amount + yield_earned;
-        payout
+        base_amount + yield_earned
     }
 }
 impl User {

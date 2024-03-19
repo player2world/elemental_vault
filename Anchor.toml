@@ -5,14 +5,14 @@ seeds = false
 skip-lint = false
 
 [programs.localnet]
-elemental_vault = "4mEadSTaipg1DNU4ELELNNMqmTNhCbKHHjckDdXM3DLx"
+elemental_vault = "6E4qLpT6Pa8jQXUe8oh4TPuiXknQCRGCeckynyWw8Bdx"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Localnet"
-wallet = "/home/justinlee/.config/solana/id.json"
+cluster = "localnet"
+wallet = "/home/justinlee/.config/solana/devnet.json"
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"

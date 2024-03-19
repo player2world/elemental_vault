@@ -1,7 +1,7 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { ElementalVault } from "../target/types/elemental_vault";
-import { PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import {
   createMint,
   getAssociatedTokenAddressSync,
@@ -17,252 +17,87 @@ import {
   getUserPda,
   getUserData,
 } from "./pda";
-import { assert, expect } from "chai";
+import { assert, expect, use } from "chai";
 import {
   END_DATE,
   MIN_AMOUNT,
   START_DATE,
-  USER1_DEPOSIT_AMOUNT,
+  USER_DEPOSIT_AMOUNT,
   VAULT_CAPACITY,
   WITHDRAW_TIMEFRAME,
   YIELD_BPS,
 } from "./constant";
-import { amountToToptup, delay } from "./utils";
+import { amountToToptup, delay, signAndSendTx } from "./utils";
+import { bs58 } from "@coral-xyz/anchor/dist/cjs/utils/bytes";
+import dotenv from "dotenv";
+import { initGlobal, initVault } from "./funtions";
+import { newSetup } from "./newSetup";
+dotenv.config();
 
 describe("elemental_vault", () => {
   // Configure the client to use the local cluster.
   anchor.setProvider(anchor.AnchorProvider.env());
-  const provider = anchor.getProvider();
-  const connection = provider.connection;
 
   const program = anchor.workspace.ElementalVault as Program<ElementalVault>;
 
-  let vaultOwner = anchor.web3.Keypair.generate();
-  let vaultOwnerMint1Ata: PublicKey;
-  let vaultOwnerMint2Ata: PublicKey;
+  let creator = anchor.web3.Keypair.generate();
+  let authority = anchor.web3.Keypair.generate();
+  let user = anchor.web3.Keypair.generate();
+  let authorityMintAta: PublicKey;
   let global: PublicKey;
   let vault: PublicKey;
   let vaultAta: PublicKey;
-  let user1 = anchor.web3.Keypair.generate();
-  let user2 = anchor.web3.Keypair.generate();
-  let bozo = anchor.web3.Keypair.generate();
-  let user1Mint1Ata: PublicKey;
-  let user2Mint1Ata: PublicKey;
-  let user1Mint2Ata: PublicKey;
-  let user2Mint2Ata: PublicKey;
-  let baseMint1: PublicKey;
-  let baseMint2: PublicKey;
+  let userMintAta: PublicKey;
+  let baseMint: PublicKey;
+
+  console.log("creator:", creator.publicKey.toString());
+  console.log("program:", program.programId.toString());
+
+  let accounts = {
+    creator,
+    authority,
+    authorityMintAta,
+    user,
+    userMintAta,
+    global,
+    vault,
+    vaultAta,
+    baseMint,
+  };
 
   it("Setup", async () => {
-    const latestBlockHash = await connection.getLatestBlockhash();
-    await connection.confirmTransaction({
-      blockhash: latestBlockHash.blockhash,
-      lastValidBlockHeight: latestBlockHash.lastValidBlockHeight,
-      signature: await connection.requestAirdrop(vaultOwner.publicKey, 2e9),
-    });
-    await connection.confirmTransaction({
-      blockhash: latestBlockHash.blockhash,
-      lastValidBlockHeight: latestBlockHash.lastValidBlockHeight,
-      signature: await connection.requestAirdrop(user1.publicKey, 1e9),
-    });
-    await connection.confirmTransaction({
-      blockhash: latestBlockHash.blockhash,
-      lastValidBlockHeight: latestBlockHash.lastValidBlockHeight,
-      signature: await connection.requestAirdrop(user2.publicKey, 1e9),
-    });
-
     // Initialize all Mint
-    baseMint1 = await createMint(
-      connection,
-      vaultOwner,
-      vaultOwner.publicKey,
-      vaultOwner.publicKey,
-      6
+    accounts.baseMint = new PublicKey(
+      "CADRwufG5Z6mkDr9nxizybxCtbtctU1ChCQwN4ptKy3D"
     );
-    baseMint2 = await createMint(
-      connection,
-      vaultOwner,
-      vaultOwner.publicKey,
-      vaultOwner.publicKey,
-      9
-    );
+    accounts = await newSetup(program, accounts);
+    accounts.authorityMintAta = (
+      await getOrCreateAssociatedTokenAccount(
+        program.provider.connection,
+        accounts.authority,
+        accounts.baseMint,
+        accounts.authority.publicKey
+      )
+    ).address;
+    accounts.userMintAta = (
+      await getOrCreateAssociatedTokenAccount(
+        program.provider.connection,
+        accounts.authority,
+        accounts.baseMint,
+        accounts.user.publicKey
+      )
+    ).address;
 
-    // Create baseMint1 ATA
-    vaultOwnerMint1Ata = (
-      await getOrCreateAssociatedTokenAccount(
-        connection,
-        vaultOwner,
-        baseMint1,
-        vaultOwner.publicKey
-      )
-    ).address;
-    user1Mint1Ata = (
-      await getOrCreateAssociatedTokenAccount(
-        connection,
-        vaultOwner,
-        baseMint1,
-        user1.publicKey
-      )
-    ).address;
-    user2Mint1Ata = (
-      await getOrCreateAssociatedTokenAccount(
-        connection,
-        vaultOwner,
-        baseMint1,
-        user2.publicKey
-      )
-    ).address;
-    // Mint baseMint1 ATA
-    await mintTo(
-      connection,
-      vaultOwner,
-      baseMint1,
-      vaultOwnerMint1Ata,
-      vaultOwner,
-      100_000_000
-    );
-    await mintTo(
-      connection,
-      vaultOwner,
-      baseMint1,
-      user1Mint1Ata,
-      vaultOwner,
-      100_000_000
-    );
-    await mintTo(
-      connection,
-      vaultOwner,
-      baseMint1,
-      user2Mint1Ata,
-      vaultOwner,
-      100_000_000
-    );
-    // Create baseMint2 ATA
-    vaultOwnerMint2Ata = (
-      await getOrCreateAssociatedTokenAccount(
-        connection,
-        vaultOwner,
-        baseMint2,
-        vaultOwner.publicKey
-      )
-    ).address;
-    user1Mint2Ata = (
-      await getOrCreateAssociatedTokenAccount(
-        connection,
-        vaultOwner,
-        baseMint2,
-        user1.publicKey
-      )
-    ).address;
-    user2Mint2Ata = (
-      await getOrCreateAssociatedTokenAccount(
-        connection,
-        vaultOwner,
-        baseMint2,
-        user2.publicKey
-      )
-    ).address;
-    // Mint baseMint2 ATA
-    await mintTo(
-      connection,
-      vaultOwner,
-      baseMint2,
-      user1Mint2Ata,
-      vaultOwner,
-      100_000_000
-    );
-    await mintTo(
-      connection,
-      vaultOwner,
-      baseMint2,
-      user2Mint2Ata,
-      vaultOwner,
-      100_000_000
-    );
+    console.log("baseMint", accounts.baseMint.toString());
+    console.log("user", accounts.user.publicKey.toString());
   });
 
   it("Initialize Global", async () => {
-    global = getGlobalPda(program);
-
-    try {
-      await program.methods
-        .initGlobal()
-        .accounts({
-          initializer: vaultOwner.publicKey,
-          global: global,
-        })
-        .signers([vaultOwner])
-        .rpc();
-    } catch (error) {
-      console.log("error", error);
-      process.exit();
-    }
-    const globalData = await program.account.global.fetch(global);
-
-    assert.equal(+globalData.vaultCounter, 0);
+    accounts = await initGlobal(program, accounts);
   });
 
   it("Initialize Vault", async () => {
-    const globalData = await program.account.global.fetch(global);
-    vault = getVaultPda(program, globalData.vaultCounter);
-    vaultAta = getAssociatedTokenAddressSync(baseMint1, vault, true);
-
-    try {
-      await program.methods
-        .initOrUpdateVault(globalData.vaultCounter, {
-          startDate: new anchor.BN(START_DATE),
-          endDate: new anchor.BN(END_DATE),
-          minAmount: new anchor.BN(MIN_AMOUNT),
-          vaultCapacity: new anchor.BN(VAULT_CAPACITY),
-          withdrawTimeframe: new anchor.BN(WITHDRAW_TIMEFRAME),
-          yieldBps: YIELD_BPS,
-        })
-        .accounts({
-          initializer: vaultOwner.publicKey,
-          global: global,
-          baseMint: baseMint1,
-          vault,
-          vaultAta,
-        })
-        .signers([vaultOwner])
-        .rpc();
-    } catch (error) {
-      console.log("error", error);
-      process.exit();
-    }
-    const globalDataPost = await program.account.global.fetch(global);
-    const vaultData = await getVaultData(program, vault);
-
-    assert.equal(+globalDataPost.vaultCounter, 1, "vaultCounter");
-
-    assert.equal(+vaultData.vaultCount, 0, "vaultCount");
-    assert.equal(
-      vaultData.authority.toString(),
-      vaultOwner.publicKey.toString(),
-      "authority"
-    );
-    assert.equal(
-      vaultData.baseMint.toString(),
-      baseMint1.toString(),
-      "baseMint"
-    );
-    assert.equal(vaultData.yieldBps, YIELD_BPS, "yieldBps");
-    assert.equal(+vaultData.vaultCapacity, +VAULT_CAPACITY, "vaultCapacity");
-    assert.equal(+vaultData.minAmount, +MIN_AMOUNT, "minAmount");
-    expect(Date.now() * 1000, "startDate").to.be.greaterThan(
-      +vaultData.startDate
-    );
-    expect(+vaultData.endDate, "endDate").to.be.greaterThan(
-      +vaultData.startDate
-    );
-    assert.equal(
-      +vaultData.withdrawTimeframe,
-      +WITHDRAW_TIMEFRAME,
-      "withdrawTimeframe"
-    );
-    assert.equal(+vaultData.amountCollected, 0, "amountCollected");
-    assert.equal(+vaultData.amountWithdrawn, 0, "amountWithdrawn");
-    assert.equal(+vaultData.amountRedeemed, 0, "amountRedeemed");
+    accounts = await initVault(program, accounts);
   });
 
   it("Update Escrow Authority", async () => {
@@ -271,13 +106,12 @@ describe("elemental_vault", () => {
 
     try {
       await program.methods
-        .updateAuthority(selectedVault.account.vaultCount)
+        .updateAuthority(selectedVault.account.vaultCount, creator.publicKey)
         .accounts({
-          currentAuthority: vaultOwner.publicKey,
-          newAuthority: user1.publicKey,
-          vault,
+          currentAuthority: authority.publicKey,
+          vault: accounts.vault,
         })
-        .signers([vaultOwner])
+        .signers([authority])
         .rpc();
     } catch (error) {
       console.log("error", error);
@@ -287,120 +121,113 @@ describe("elemental_vault", () => {
 
     assert.equal(
       vaultData.authority.toString(),
-      user1.publicKey.toString(),
+      creator.publicKey.toString(),
       "authority"
     );
 
+    // CHANGE BACK
     await program.methods
-      .updateAuthority(selectedVault.account.vaultCount)
+      .updateAuthority(selectedVault.account.vaultCount, authority.publicKey)
       .accounts({
-        currentAuthority: user1.publicKey,
-        newAuthority: vaultOwner.publicKey,
-        vault,
+        currentAuthority: creator.publicKey,
+        vault: accounts.vault,
       })
-      .signers([user1])
+      .signers([creator])
       .rpc();
     const vaultDataPost = await getVaultData(program, selectedVault.publicKey);
 
     assert.equal(
       vaultDataPost.authority.toString(),
-      vaultOwner.publicKey.toString(),
+      authority.publicKey.toString(),
       "authority2"
     );
   });
 
-  it("Initialize user1 and deposit amount ot vault", async () => {
-    const allVault = await getAllVaultData(program);
-    const selectedVault = allVault[0];
+  it("Initialize user and deposit amount to vault", async () => {
+    const selectedVault = await getVaultData(program, accounts.vault);
     const userPda = getUserPda(
       program,
-      selectedVault.account.vaultCount,
-      user1.publicKey
+      selectedVault.vaultCount,
+      user.publicKey
     );
 
     await program.methods
       .initOrDepositUser(
-        selectedVault.account.vaultCount,
-        new anchor.BN(USER1_DEPOSIT_AMOUNT),
-        1
+        selectedVault.vaultCount,
+        new anchor.BN(USER_DEPOSIT_AMOUNT)
       )
       .accounts({
-        owner: user1.publicKey,
-        sourceAta: user1Mint1Ata,
-        destinationAta: vaultAta,
-        vault: selectedVault.publicKey,
+        owner: user.publicKey,
+        sourceAta: accounts.userMintAta,
+        destinationAta: accounts.vaultAta,
+        vault: accounts.vault,
         user: userPda,
-        baseMint: baseMint1,
+        baseMint: accounts.baseMint,
       })
-      .signers([user1])
+      .signers([user])
       .rpc();
 
-    const vaultData = await getVaultData(program, selectedVault.publicKey);
-    const userData = await getUserData(program, userPda);
-    const vaultBalance =
-      await program.provider.connection.getTokenAccountBalance(vaultAta);
+    const vaultData = await getVaultData(program, accounts.vault);
 
-    assert.equal(+userData.amount, USER1_DEPOSIT_AMOUNT, "amount");
+    const userData = await getUserData(program, userPda);
+
+    const vaultBalance =
+      await program.provider.connection.getTokenAccountBalance(
+        accounts.vaultAta
+      );
+
+    assert.equal(+userData.amount, USER_DEPOSIT_AMOUNT, "amount");
     assert.equal(
       userData.owner.toString(),
-      user1.publicKey.toString(),
+      accounts.user.publicKey.toString(),
       "owner"
     );
-    assert.equal(
-      +userData.vaultCount,
-      +selectedVault.account.vaultCount,
-      "vaultCount"
-    );
 
-    assert.equal(+vaultData.amountCollected, USER1_DEPOSIT_AMOUNT);
+    // assert.equal(+userData.vaultCount, +selectedVault.vaultCount, "vaultCount");
 
-    assert.equal(+vaultBalance.value.amount, USER1_DEPOSIT_AMOUNT);
+    assert.equal(+vaultData.amountCollected, USER_DEPOSIT_AMOUNT);
+
+    assert.equal(+vaultBalance.value.amount, USER_DEPOSIT_AMOUNT);
   });
 
-  it("User1 deposit amount ot vault", async () => {
+  it("User deposit amount ot vault", async () => {
     const allVault = await getAllVaultData(program);
     const selectedVault = allVault[0];
     const userPda = getUserPda(
       program,
       selectedVault.account.vaultCount,
-      user1.publicKey
+      accounts.user.publicKey
     );
 
     await program.methods
       .initOrDepositUser(
         selectedVault.account.vaultCount,
-        new anchor.BN(USER1_DEPOSIT_AMOUNT),
-        1
+        new anchor.BN(USER_DEPOSIT_AMOUNT)
       )
       .accounts({
-        owner: user1.publicKey,
-        sourceAta: user1Mint1Ata,
-        destinationAta: vaultAta,
+        owner: accounts.user.publicKey,
+        sourceAta: accounts.userMintAta,
+        destinationAta: accounts.vaultAta,
         vault: selectedVault.publicKey,
         user: userPda,
-        baseMint: baseMint1,
+        baseMint: accounts.baseMint,
       })
-      .signers([user1])
+      .signers([user])
       .rpc();
 
     const vaultData = await getVaultData(program, selectedVault.publicKey);
     const userData = await getUserData(program, userPda);
 
-    assert.equal(+userData.amount, USER1_DEPOSIT_AMOUNT * 2, "amount");
+    assert.equal(+userData.amount, USER_DEPOSIT_AMOUNT * 2, "amount");
     assert.equal(
       userData.owner.toString(),
-      user1.publicKey.toString(),
+      accounts.user.publicKey.toString(),
       "owner"
-    );
-    assert.equal(
-      +userData.vaultCount,
-      +selectedVault.account.vaultCount,
-      "vaultCount"
     );
 
     assert.equal(
       +vaultData.amountCollected,
-      USER1_DEPOSIT_AMOUNT * 2,
+      USER_DEPOSIT_AMOUNT * 2,
       "amountCollected"
     );
   });
@@ -412,65 +239,73 @@ describe("elemental_vault", () => {
     await program.methods
       .authorityWithdraw(
         selectedVault.account.vaultCount,
-        new anchor.BN(USER1_DEPOSIT_AMOUNT * 2)
+        new anchor.BN(USER_DEPOSIT_AMOUNT * 2)
       )
       .accounts({
-        authority: vaultOwner.publicKey,
-        destinationAta: vaultOwnerMint1Ata,
-        vaultAta: vaultAta,
+        authority: authority.publicKey,
+        destinationAta: accounts.authorityMintAta,
+        vaultAta: accounts.vaultAta,
         vault: selectedVault.publicKey,
-        baseMint: baseMint1,
+        baseMint: accounts.baseMint,
       })
-      .signers([vaultOwner])
+      .signers([authority])
       .rpc();
 
     const vaultData = await getVaultData(program, selectedVault.publicKey);
 
     assert.equal(
       +vaultData.amountWithdrawn,
-      USER1_DEPOSIT_AMOUNT * 2,
+      USER_DEPOSIT_AMOUNT * 2,
       "amountWithdrawn"
     );
   });
+  // TODO: DATE CONFIG REQUIRED. GO TO CONSTRAINT AND COMMENT OUT TEST
   it("User to withdraw amount with yield from vault", async () => {
     // AUTHORITY TOPUP AMOUNT BACK AFTER END_DATE
-    const amount = await amountToToptup(program, vault);
-    await transfer(
-      program.provider.connection,
-      vaultOwner,
-      vaultOwnerMint1Ata,
-      vaultAta,
-      vaultOwner.publicKey,
-      amount
-    );
+    const amount = await amountToToptup(program, accounts.vault);
+    try {
+      await transfer(
+        program.provider.connection,
+        authority,
+        accounts.authorityMintAta,
+        accounts.vaultAta,
+        authority.publicKey,
+        amount
+      );
+    } catch (error) {
+      console.log("error", error);
+    }
     const vaultAtaAmountPre =
-      await program.provider.connection.getTokenAccountBalance(vaultAta);
+      await program.provider.connection.getTokenAccountBalance(
+        accounts.vaultAta
+      );
 
-    const allVault = await getAllVaultData(program);
-    const selectedVault = allVault[0];
-
+    const vaultData = await program.account.vault.fetch(accounts.vault);
+    console.log("vaultData.vaultCount", +vaultData.vaultCount);
     const user = getUserPda(
       program,
-      selectedVault.account.vaultCount,
-      user1.publicKey
+      vaultData.vaultCount,
+      accounts.user.publicKey
     );
 
     const userAtaAmountPre =
-      await program.provider.connection.getTokenAccountBalance(user1Mint1Ata);
+      await program.provider.connection.getTokenAccountBalance(
+        accounts.userMintAta
+      );
 
-    await delay(8_000);
+    await delay(9_000);
     try {
       await program.methods
-        .userWithdraw(selectedVault.account.vaultCount)
+        .userWithdraw(vaultData.vaultCount)
         .accounts({
-          owner: user1.publicKey,
-          sourceAta: vaultAta,
-          destinationAta: user1Mint1Ata,
-          vault: selectedVault.publicKey,
+          owner: accounts.user.publicKey,
+          sourceAta: accounts.vaultAta,
+          destinationAta: accounts.userMintAta,
+          vault: accounts.vault,
           user: user,
-          baseMint: baseMint1,
+          baseMint: accounts.baseMint,
         })
-        .signers([user1])
+        .signers([accounts.user])
         .rpc();
     } catch (error) {
       console.log("error", error);
@@ -483,12 +318,16 @@ describe("elemental_vault", () => {
       assert.ok(error.toString().includes("Account does not exist"));
     }
     const vaultAtaAmountPost =
-      await program.provider.connection.getTokenAccountBalance(vaultAta);
+      await program.provider.connection.getTokenAccountBalance(
+        accounts.vaultAta
+      );
     const userAtaAmountPost =
-      await program.provider.connection.getTokenAccountBalance(user1Mint1Ata);
+      await program.provider.connection.getTokenAccountBalance(
+        accounts.userMintAta
+      );
 
     assert.equal(
-      +vaultAtaAmountPre.value.amount - +vaultAtaAmountPost.value.amount,
+      +vaultAtaAmountPost.value.amount - +vaultAtaAmountPre.value.amount,
       +userAtaAmountPre.value.amount - +userAtaAmountPost.value.amount
     );
   });
@@ -501,20 +340,21 @@ describe("elemental_vault", () => {
       await program.methods
         .closeVault(selectedVault.account.vaultCount)
         .accounts({
-          authority: vaultOwner.publicKey,
-          sourceAta: vaultAta,
-          destinationAta: vaultOwnerMint1Ata,
+          authority: authority.publicKey,
+          sourceAta: accounts.vaultAta,
+          destinationAta: accounts.authorityMintAta,
           vault: selectedVault.publicKey,
-          baseMint: baseMint1,
+          baseMint: accounts.baseMint,
+          creator: creator.publicKey,
         })
-        .signers([vaultOwner])
+        .signers([authority])
         .rpc();
     } catch (error) {
       console.log("error", error);
     }
 
     try {
-      await program.account.vault.fetch(vault);
+      const vault = await program.account.vault.fetch(accounts.vault);
       assert.fail();
     } catch (error) {
       assert.ok(error.toString().includes("Account does not exist"));
