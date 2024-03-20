@@ -30,7 +30,7 @@ import {
 import { amountToToptup, delay, signAndSendTx } from "./utils";
 import { bs58 } from "@coral-xyz/anchor/dist/cjs/utils/bytes";
 import dotenv from "dotenv";
-import { initGlobal, initVault } from "./funtions";
+import { getKpFromEnv, initGlobal, initVault } from "./funtions";
 import { newSetup } from "./newSetup";
 dotenv.config();
 
@@ -40,8 +40,16 @@ describe("elemental_vault", () => {
 
   const program = anchor.workspace.ElementalVault as Program<ElementalVault>;
 
-  let creator = anchor.web3.Keypair.generate();
-  let authority = anchor.web3.Keypair.generate();
+  let creator: Keypair;
+  let authority: Keypair;
+  try {
+    creator = getKpFromEnv(process.env.CREATOR_KEY);
+    authority = getKpFromEnv(process.env.AUTHORITY_KEY);
+  } catch (error) {
+    creator = anchor.web3.Keypair.generate();
+    authority = anchor.web3.Keypair.generate();
+  }
+
   let user = anchor.web3.Keypair.generate();
   let authorityMintAta: PublicKey;
   let global: PublicKey;
@@ -51,6 +59,7 @@ describe("elemental_vault", () => {
   let baseMint: PublicKey;
 
   console.log("creator:", creator.publicKey.toString());
+  console.log("authority:", authority.publicKey.toString());
   console.log("program:", program.programId.toString());
 
   let accounts = {
@@ -66,11 +75,18 @@ describe("elemental_vault", () => {
   };
 
   it("Setup", async () => {
-    // Initialize all Mint
+    // USDC MAINNET
     accounts.baseMint = new PublicKey(
-      "CADRwufG5Z6mkDr9nxizybxCtbtctU1ChCQwN4ptKy3D"
+      "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
     );
-    accounts = await newSetup(program, accounts);
+    // USDC DEVNET
+    // accounts.baseMint = new PublicKey(
+    //   "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
+    // );
+
+    // TESTING: UNCOMMENT NEWSETUP FOR TEST
+    // accounts = await newSetup(program, accounts);
+
     accounts.authorityMintAta = (
       await getOrCreateAssociatedTokenAccount(
         program.provider.connection,
@@ -93,6 +109,7 @@ describe("elemental_vault", () => {
   });
 
   it("Initialize Global", async () => {
+    // TESTING: ONLY RUN ONCE, COMMENT OUT FOR SUBSEQUENT RUN
     accounts = await initGlobal(program, accounts);
   });
 
@@ -100,6 +117,8 @@ describe("elemental_vault", () => {
     accounts = await initVault(program, accounts);
   });
 
+  // TESTING: COMMENT OUT EVERYTHING BELOW FOR PROD/DEVNET
+  // NOTE: DON'T REMOVE THE LAST CLOSING SYNTAX })
   it("Update Escrow Authority", async () => {
     const allVault = await getAllVaultData(program);
     const selectedVault = allVault[0];

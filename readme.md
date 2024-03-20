@@ -1,5 +1,26 @@
 # Liquidity Vault
 
+## Running Test Script
+
+1. Enter `yarn` to install all dependency
+2. Update wallet path `Anchor.toml` line 15
+3. Set cluster to either `localnet`
+4. Clone and rename `.env.example` file to `.env`
+5. Update both creator and authority key in array format - i.e. [5, 111, 9 ...]
+6. `CTRL + F` to global search for `// TESTING:`, uncomment for local test
+7. run $ `anchor test`
+
+## Create New Vault
+
+1. Enter `yarn` to install all dependency
+2. Update wallet path `Anchor.toml` line 15
+3. Set cluster to either `devnet` or `mainnet-beta`
+4. Clone and rename `.env.example` file to `.env`
+5. Update both creator and authority key in array format - i.e. [5, 111, 9 ...]
+6. run $ `anchor build`
+7. run $ `anchor run test`
+8. Copy the vault Pubkey and paste it to the frontend
+
 ## State Accounts
 
 #### Global
@@ -18,6 +39,7 @@ The Vault state stores information. The state is updatable as long as the vault 
 ```
 ["vault", vault_count]
 vault_count: u64,
+creator: Pubkey, // Rent source & destination
 authority: Pubkey, // Withdraw and update vault state
 base_mint: Pubkey,
 yield_bps: u16,
@@ -51,7 +73,3 @@ amount: u64,
 5. authority_withdraw
 6. user_withdraw
 7. close_vault
-
-## Limitation
-
-Most instructions require the vault to be mutable. Multiple requests within the same block will cause an issue due to a write-lock.

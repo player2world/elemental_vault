@@ -4,7 +4,7 @@ import { getGlobalPda, getVaultData, getVaultPda } from "./pda";
 import { ElementalVault } from "../target/types/elemental_vault";
 import { IAccounts } from "./types";
 import { assert, expect } from "chai";
-import { Transaction } from "@solana/web3.js";
+import { Keypair, Transaction } from "@solana/web3.js";
 import { signAndSendTx } from "./utils";
 import {
   createMint,
@@ -21,12 +21,12 @@ import {
   WITHDRAW_TIMEFRAME,
   YIELD_BPS,
 } from "./constant";
+import { bs58 } from "@coral-xyz/anchor/dist/cjs/utils/bytes";
 
 export const newSetup = async (
   program: Program<ElementalVault>,
   accounts: IAccounts
 ) => {
-  console.log("TEST 0");
   const latestBlockHash =
     await program.provider.connection.getLatestBlockhash();
   await program.provider.connection.confirmTransaction({
@@ -103,8 +103,6 @@ export const initGlobal = async (
   accounts: IAccounts
 ) => {
   accounts.global = getGlobalPda(program);
-  console.log("global", accounts.global.toString());
-  console.log("program.programId", program.programId.toString());
   try {
     await program.methods
       .initGlobal()
@@ -196,4 +194,14 @@ export const initVault = async (
   assert.equal(+vaultData.amountRedeemed, 0, "amountRedeemed");
 
   return accounts;
+};
+
+export const getKpFromEnv = (key: string) => {
+  const decodeKp = bs58.decode(key);
+  const u8IntKp = new Uint8Array(
+    decodeKp.buffer,
+    decodeKp.byteOffset,
+    decodeKp.byteLength / Uint8Array.BYTES_PER_ELEMENT
+  );
+  return Keypair.fromSecretKey(u8IntKp);
 };
