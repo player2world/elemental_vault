@@ -8,7 +8,7 @@ mod state;
 use contexts::*;
 use error::ErrorCode;
 
-declare_id!("6E4qLpT6Pa8jQXUe8oh4TPuiXknQCRGCeckynyWw8Bdx");
+declare_id!("Cq4qXN5syKaUt6if8wLH8fNZy2epnsByemJtpbis8awH");
 
 #[program]
 pub mod elemental_vault {
@@ -242,7 +242,11 @@ pub mod elemental_vault {
         Ok(())
     }
 
-    pub fn close_vault(ctx: Context<CloseVault>, vault_count: u64) -> Result<()> {
+    pub fn close_vault(
+        ctx: Context<CloseVault>,
+        vault_count: u64,
+        _authority: Pubkey,
+    ) -> Result<()> {
         let vault = &ctx.accounts.vault;
         let source_ata = &ctx.accounts.source_ata;
         let destination_ata = &ctx.accounts.destination_ata;
@@ -256,6 +260,7 @@ pub mod elemental_vault {
         ]];
 
         if vault.end_date + vault.withdraw_timeframe > (Clock::get()?.unix_timestamp * 1000) as u64
+            && source_ata.amount > 0
         {
             return err!(ErrorCode::VaultNotReady);
         }

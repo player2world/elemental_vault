@@ -205,3 +205,12 @@ export const getKpFromEnv = (key: string) => {
   );
   return Keypair.fromSecretKey(u8IntKp);
 };
+export const getKpFromSecretKey = (key: string) => {
+  const decodeKp = bs58.decode(key);
+  const u8IntKp = new Uint8Array(
+    decodeKp.buffer,
+    decodeKp.byteOffset,
+    decodeKp.byteLength / Uint8Array.BYTES_PER_ELEMENT
+  );
+  return Keypair.fromSecretKey(u8IntKp);
+};

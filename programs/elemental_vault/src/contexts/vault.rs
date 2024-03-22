@@ -88,11 +88,11 @@ pub struct AuthorityWithdraw<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(vault_count: u64)]
+#[instruction(vault_count: u64, authority: Pubkey)]
 pub struct CloseVault<'info> {
     // Vault authority
     #[account(mut)]
-    pub authority: Signer<'info>,
+    pub initializer: Signer<'info>,
     // Vault ATA to store base mint token.
     #[account(
         mut,
